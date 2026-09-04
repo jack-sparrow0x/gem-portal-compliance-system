@@ -1,16 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
-import { uploadToS3, extractTextFromS3 } from '@/lib/services/textract';
+import { extractTextFromS3 } from '@/lib/services/textract';
 import { extractDocumentFields, evaluateCompliance } from '@/lib/services/gemini';
 import { verifyGovRecord } from '@/lib/services/govAdapter';
 import type { BidDocument, ExtractedDocumentData, GovVerificationResult } from '@/types';
 
 export async function POST(request: NextRequest) {
-  try {
-    const { bid_id } = await request.json();
-    if (!bid_id) return NextResponse.json({ error: 'bid_id required' }, { status: 400 });
+  let bid_id: string | null = null;
+  const supabase = await createAdminClient();
 
-    const supabase = await createAdminClient();
+  try {
+    const body = await request.json();
+    bid_id = body.bid_id;
+    if (!bid_id) return NextResponse.json({ error: 'bid_id required' }, { status: 400 });
 
     // ── Step 0: Load bid + documents + tender ─────────────────
     const { data: bid, error: bidError } = await supabase
@@ -70,7 +72,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Update status
+    // Update status to gov verified
     await supabase.from('bids').update({ status: 'GOV_VERIFIED' }).eq('id', bid_id);
 
     // ── Step 3: Gemini compliance analysis ────────────────────
@@ -111,8 +113,22 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json({ success: true, bid_id, report });
+
   } catch (error) {
     console.error('[process-bid] Error:', error);
+
+    // ── Mark bid as FAILED so it doesn't stay stuck at OCR_PROCESSING ──
+    if (bid_id) {
+      await supabase
+        .from('bids')
+        .update({
+          status: 'FAILED',
+          officer_remarks: `Pipeline error: ${String(error).slice(0, 500)}`,
+        })
+        .eq('id', bid_id)
+        .eq('status', 'OCR_PROCESSING'); // only update if still stuck
+    }
+
     return NextResponse.json(
       { success: false, error: String(error) },
       { status: 500 }

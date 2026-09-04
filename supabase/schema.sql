@@ -30,7 +30,8 @@ DO $$ BEGIN
     'REPORT_READY',
     'APPROVED',
     'REJECTED',
-    'CLARIFICATION_REQUESTED'
+    'CLARIFICATION_REQUESTED',
+    'FAILED'
   );
 EXCEPTION WHEN duplicate_object THEN null; END $$;
 
