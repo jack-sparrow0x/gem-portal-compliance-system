@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createAdminClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import type { Bid, Tender, Profile, ComplianceReport } from '@/types';
@@ -30,12 +30,14 @@ export default async function OfficerDashboard({
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
+  const adminSupabase = await createAdminClient();
+
   // Verify officer role
-  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
+  const { data: profile } = await adminSupabase.from('profiles').select('role').eq('id', user.id).single();
   if (profile?.role !== 'officer') redirect('/dashboard/bidder');
 
   // Load all bids with joined data
-  let query = supabase
+  let query = adminSupabase
     .from('bids')
     .select(`
       *,

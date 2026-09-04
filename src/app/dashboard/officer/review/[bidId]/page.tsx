@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createAdminClient } from '@/lib/supabase/server';
 import { redirect, notFound } from 'next/navigation';
 import Link from 'next/link';
 import { OfficerReviewPanel } from '@/components/OfficerReviewPanel';
@@ -15,11 +15,13 @@ export default async function ReviewPage({
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
+  const adminSupabase = await createAdminClient();
+
+  const { data: profile } = await adminSupabase.from('profiles').select('role').eq('id', user.id).single();
   if (profile?.role !== 'officer') redirect('/dashboard/bidder');
 
   // Load full bid with all relations
-  const { data: bid } = await supabase
+  const { data: bid } = await adminSupabase
     .from('bids')
     .select(`
       *,
