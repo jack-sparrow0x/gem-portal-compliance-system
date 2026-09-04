@@ -5,9 +5,14 @@ import { createServerClient } from '@supabase/ssr';
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
+  // Guard: if env vars are missing, skip middleware entirely (avoids crash)
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+    return supabaseResponse;
+  }
+
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
     {
       cookies: {
         getAll() {
@@ -24,55 +29,22 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  // Refresh session
+  // Refresh session — this is the only thing middleware should do
+  // DB queries (profile role lookups) are NOT done here because they
+  // are unreliable in the Vercel Edge Runtime. Role-based redirects
+  // happen inside each dashboard page instead.
   const { data: { user } } = await supabase.auth.getUser();
 
   const pathname = request.nextUrl.pathname;
 
-  // Public routes
-  if (pathname === '/' || pathname.startsWith('/login')) {
-    // Redirect logged-in users away from login
-    if (user) {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .single();
-
-      const role = profile?.role ?? 'bidder';
-      return NextResponse.redirect(
-        new URL(`/dashboard/${role}`, request.url)
-      );
-    }
-    return supabaseResponse;
+  // If logged in and on login/home page, send to dashboard (role resolved in page)
+  if ((pathname === '/' || pathname.startsWith('/login')) && user) {
+    return NextResponse.redirect(new URL('/dashboard', request.url));
   }
 
-  // Protected routes
-  if (!user) {
+  // Protected routes — redirect unauthenticated users to login
+  if (pathname.startsWith('/dashboard') && !user) {
     return NextResponse.redirect(new URL('/login', request.url));
-  }
-
-  // Role-based routing
-  if (pathname.startsWith('/dashboard/bidder')) {
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', user.id)
-      .single();
-    if (profile?.role !== 'bidder') {
-      return NextResponse.redirect(new URL('/dashboard/officer', request.url));
-    }
-  }
-
-  if (pathname.startsWith('/dashboard/officer')) {
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', user.id)
-      .single();
-    if (profile?.role !== 'officer') {
-      return NextResponse.redirect(new URL('/dashboard/bidder', request.url));
-    }
   }
 
   return supabaseResponse;
